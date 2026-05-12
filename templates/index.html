@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <title>Convertidor de imágenes</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: sans-serif; background: #111; color: #eee; min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 2rem; }
+    h1 { margin-bottom: 1.5rem; font-size: 1.4rem; color: #ccc; }
+    #drop-zone {
+      width: 100%; max-width: 560px; border: 2px dashed #555; border-radius: 10px;
+      padding: 3rem 2rem; text-align: center; cursor: pointer; transition: border-color 0.2s, background 0.2s;
+    }
+    #drop-zone.over { border-color: #4e9fff; background: #1a2a3a; }
+    #drop-zone p { color: #888; font-size: 0.95rem; }
+    #file-input { display: none; }
+    #file-list { margin-top: 1rem; width: 100%; max-width: 560px; }
+    .file-item { background: #1e1e1e; border-radius: 6px; padding: 0.5rem 0.8rem; margin-bottom: 0.4rem; font-size: 0.85rem; color: #bbb; }
+    .controls { margin-top: 1.2rem; width: 100%; max-width: 560px; display: flex; align-items: center; gap: 1rem; }
+    label { color: #aaa; font-size: 0.9rem; white-space: nowrap; }
+    input[type=range] { flex: 1; accent-color: #4e9fff; }
+    #quality-val { min-width: 2.2rem; text-align: right; color: #4e9fff; font-weight: bold; }
+    .name-row { margin-top: 1rem; width: 100%; max-width: 560px; display: flex; align-items: center; gap: 1rem; }
+    .name-row label { color: #aaa; font-size: 0.9rem; white-space: nowrap; }
+    .name-row input[type=text] {
+      flex: 1; background: #1e1e1e; border: 1px solid #444; border-radius: 6px;
+      color: #eee; padding: 0.45rem 0.7rem; font-size: 0.9rem; outline: none;
+      transition: border-color 0.2s;
+    }
+    .name-row input[type=text]:focus { border-color: #4e9fff; }
+    .name-row input[type=text]::placeholder { color: #555; }
+    button {
+      margin-top: 1.2rem; width: 100%; max-width: 560px; padding: 0.8rem;
+      background: #4e9fff; border: none; border-radius: 8px; color: #fff;
+      font-size: 1rem; cursor: pointer; transition: background 0.2s;
+    }
+    button:hover { background: #2e7fe0; }
+    button:disabled { background: #333; color: #666; cursor: not-allowed; }
+    #status { margin-top: 1rem; font-size: 0.9rem; color: #4e9fff; min-height: 1.2rem; }
+  </style>
+</head>
+<body>
+  <h1>Convertidor a WebP + AVIF</h1>
+
+  <div id="drop-zone">
+    <p>Arrastra imágenes aquí<br>o haz clic para seleccionar</p>
+    <input type="file" id="file-input" multiple accept="image/*">
+  </div>
+
+  <div id="file-list"></div>
+
+  <div class="name-row">
+    <label>Nombre de salida:</label>
+    <input type="text" id="output-name" placeholder="Dejar vacío para usar el nombre original">
+  </div>
+
+  <div class="controls">
+    <label>Calidad:</label>
+    <input type="range" id="quality" min="10" max="100" value="80">
+    <span id="quality-val">80</span>
+  </div>
+
+  <button id="btn" disabled>Convertir y descargar imágenes</button>
+  <div id="status"></div>
+
+  <script>
+    const drop = document.getElementById("drop-zone");
+    const input = document.getElementById("file-input");
+    const list = document.getElementById("file-list");
+    const btn = document.getElementById("btn");
+    const status = document.getElementById("status");
+    const qualitySlider = document.getElementById("quality");
+    const qualityVal = document.getElementById("quality-val");
+    const outputName = document.getElementById("output-name");
+    let files = [];
+
+    qualitySlider.addEventListener("input", () => qualityVal.textContent = qualitySlider.value);
+
+    drop.addEventListener("click", () => input.click());
+    input.addEventListener("change", () => addFiles(input.files));
+
+    drop.addEventListener("dragover", e => { e.preventDefault(); drop.classList.add("over"); });
+    drop.addEventListener("dragleave", () => drop.classList.remove("over"));
+    drop.addEventListener("drop", e => {
+      e.preventDefault();
+      drop.classList.remove("over");
+      addFiles(e.dataTransfer.files);
+    });
+
+    function addFiles(newFiles) {
+      for (const f of newFiles) {
+        if (!files.find(x => x.name === f.name && x.size === f.size)) files.push(f);
+      }
+      renderList();
+    }
+
+    function renderList() {
+      list.innerHTML = files.map((f, i) =>
+        `<div class="file-item">&#128247; ${f.name} <span style="float:right;cursor:pointer;color:#f66" onclick="removeFile(${i})">&#10005;</span></div>`
+      ).join("");
+      btn.disabled = files.length === 0;
+      status.textContent = "";
+    }
+
+    function removeFile(i) { files.splice(i, 1); renderList(); }
+
+    btn.addEventListener("click", async () => {
+      if (!files.length) return;
+      btn.disabled = true;
+      status.textContent = "Convirtiendo…";
+
+      const form = new FormData();
+      files.forEach(f => form.append("images", f));
+      form.append("quality", qualitySlider.value);
+      form.append("output_name", outputName.value.trim());
+
+      try {
+        const res = await fetch("/convert", { method: "POST", body: form });
+        if (!res.ok) throw new Error(await res.text());
+        const results = await res.json();
+        for (const f of results) {
+          const bytes = Uint8Array.from(atob(f.data), c => c.charCodeAt(0));
+          const url = URL.createObjectURL(new Blob([bytes]));
+          const a = document.createElement("a");
+          a.href = url; a.download = f.filename; a.click();
+          URL.revokeObjectURL(url);
+          await new Promise(r => setTimeout(r, 150));
+        }
+        status.textContent = `Listo — ${results.length} archivo(s) descargado(s)`;
+      } catch (e) {
+        status.textContent = "Error: " + e.message;
+      } finally {
+        btn.disabled = false;
+      }
+    });
+  </script>
+</body>
+</html>
